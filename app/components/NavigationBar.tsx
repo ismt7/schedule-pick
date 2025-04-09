@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { HomeIcon, CalendarIcon, CogIcon } from "@heroicons/react/24/outline";
+import { HomeIcon, CogIcon } from "@heroicons/react/24/outline";
 
 export default function NavigationBar() {
   return (
