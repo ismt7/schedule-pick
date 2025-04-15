@@ -13,6 +13,11 @@ interface DateOption {
   timeRange: string;
 }
 
+interface WeeklySelection {
+  weekStart: string; // 週の開始日 (例: "2023-10-01")
+  dates: DateOption[]; // その週の選択データ
+}
+
 const generateTimeSlots = () => {
   const slots = [];
   for (let hour = 9; hour < 17; hour++) {
@@ -42,6 +47,9 @@ export default function SchedulePicker() {
     dayjs().startOf("week")
   );
   const [lunchBreaks, setLunchBreaks] = useState<string[]>([]);
+  const [weeklySelections, setWeeklySelections] = useState<WeeklySelection[]>(
+    []
+  );
 
   useEffect(() => {
     const storedLunchBreaks = localStorage.getItem("lunchBreaks");
@@ -51,6 +59,30 @@ export default function SchedulePicker() {
       setLunchBreaks(["12:00-13:00"]);
     }
   }, []);
+
+  const updateWeeklySelections = () => {
+    const groupedByWeek: { [key: string]: DateOption[] } = {};
+
+    selectedDates.forEach((dateOption) => {
+      const weekStart = dayjs(dateOption.date)
+        .startOf("week")
+        .format("YYYY-MM-DD");
+      if (!groupedByWeek[weekStart]) {
+        groupedByWeek[weekStart] = [];
+      }
+      groupedByWeek[weekStart].push(dateOption);
+    });
+
+    const newWeeklySelections = Object.entries(groupedByWeek).map(
+      ([weekStart, dates]) => ({ weekStart, dates })
+    );
+
+    setWeeklySelections(newWeeklySelections);
+  };
+
+  useEffect(() => {
+    updateWeeklySelections();
+  }, [selectedDates]);
 
   const toggleSelection = (date: string, timeRange: string) => {
     const exists = selectedDates.some(
@@ -137,28 +169,73 @@ export default function SchedulePicker() {
         timeSlots.indexOf(times[index + 1]) !== timeSlots.indexOf(time) + 1
       ) {
         endTime = end;
-        grouped.push(`${startTime}-${endTime}`);
+        const range = `${startTime}-${endTime}`;
+        if (!grouped.includes(range)) {
+          grouped.push(range);
+        }
         startTime = "";
       }
     });
+
+    console.log("Grouped time ranges for date:", date, "are:", grouped);
 
     return grouped.join(", ");
   };
 
   const copyToClipboard = () => {
-    const formattedDates = days
-      .map((day) => {
-        const groupedTimeRanges = groupTimeRanges(day.format("YYYY-MM-DD"));
-        return groupedTimeRanges
-          ? `${day.format("M月D日")} ${groupedTimeRanges}`
-          : null;
+    const formattedDates = weeklySelections
+      .flatMap((week) => {
+        return Array.from(
+          new Set(
+            week.dates.map((dateOption) => {
+              const groupedTimeRanges = groupTimeRanges(dateOption.date);
+              return groupedTimeRanges
+                ? `${dayjs(dateOption.date).format(
+                    "M月D日"
+                  )} ${groupedTimeRanges}`
+                : null;
+            })
+          )
+        ).filter(Boolean);
       })
-      .filter(Boolean)
       .join("\n");
 
     navigator.clipboard.writeText(formattedDates).then(() => {
       alert("選択した候補日がクリップボードにコピーされました！");
     });
+  };
+
+  const renderWeeklySelections = () => {
+    return weeklySelections.map((week) => (
+      <div key={week.weekStart} className="mb-4">
+        <h3 className="text-md font-semibold mb-2">
+          {dayjs(week.weekStart).format("M月D日")}週
+        </h3>
+        <ul className="bg-white p-4 rounded space-y-2">
+          {Array.from(
+            new Set(
+              week.dates.map((dateOption) => {
+                const groupedTimeRanges = groupTimeRanges(dateOption.date);
+                return groupedTimeRanges
+                  ? `${dayjs(dateOption.date).format(
+                      "M月D日"
+                    )}: ${groupedTimeRanges}`
+                  : null;
+              })
+            )
+          )
+            .filter(Boolean)
+            .map((uniqueEntry, index) => (
+              <li
+                key={index}
+                className="p-2 border rounded shadow-sm bg-gray-50"
+              >
+                {uniqueEntry}
+              </li>
+            ))}
+        </ul>
+      </div>
+    ));
   };
 
   const days = Array.from({ length: 7 }, (_, i) =>
@@ -283,21 +360,7 @@ export default function SchedulePicker() {
                   クリア
                 </button>
               </div>
-              <ul className="bg-white p-4 rounded space-y-2">
-                {days.map((day) => {
-                  const groupedTimeRanges = groupTimeRanges(
-                    day.format("YYYY-MM-DD")
-                  );
-                  return groupedTimeRanges ? (
-                    <li
-                      key={day.format("YYYY-MM-DD")}
-                      className="p-2 border rounded shadow-sm bg-gray-50"
-                    >
-                      {day.format("M月D日")}: {groupedTimeRanges}
-                    </li>
-                  ) : null;
-                })}
-              </ul>
+              {renderWeeklySelections()}
             </>
           ) : (
             <p className="text-gray-500">候補日が選択されていません。</p>
