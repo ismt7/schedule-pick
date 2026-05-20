@@ -28,6 +28,36 @@ export const useScheduleSelection = (days: Dayjs[]) => {
   const isSelected = (date: string, timeRange: string) =>
     selectedKeys.has(buildSelectionKey(date, timeRange));
 
+  const areAllSelected = (date: string, timeRanges: string[]) =>
+    timeRanges.length > 0 &&
+    timeRanges.every((timeRange) =>
+      selectedKeys.has(buildSelectionKey(date, timeRange))
+    );
+
+  const updateSelectionState = (
+    currentSelections: DateOption[],
+    date: string,
+    timeRange: string,
+    shouldSelect: boolean
+  ) => {
+    const selectionKey = buildSelectionKey(date, timeRange);
+    const hasSelection = currentSelections.some(
+      (option) => buildSelectionKey(option.date, option.timeRange) === selectionKey
+    );
+
+    if (hasSelection === shouldSelect) {
+      return currentSelections;
+    }
+
+    if (shouldSelect) {
+      return [...currentSelections, { date, timeRange }];
+    }
+
+    return currentSelections.filter(
+      (option) => buildSelectionKey(option.date, option.timeRange) !== selectionKey
+    );
+  };
+
   const toggleSelection = (date: string, timeRange: string) => {
     setSelectedDates((currentSelections) => {
       const selectionKey = buildSelectionKey(date, timeRange);
@@ -45,6 +75,17 @@ export const useScheduleSelection = (days: Dayjs[]) => {
 
       return [...currentSelections, { date, timeRange }];
     });
+  };
+
+  const setSlotSelection = (
+    date: string,
+    timeRange: string,
+    shouldSelect: boolean
+  ) => {
+    setSelectedDates((currentSelections) =>
+      updateSelectionState(currentSelections, date, timeRange, shouldSelect)
+    );
+    setLastSelected({ date, timeRange });
   };
 
   const selectRange = (date: string, timeRange: string) => {
@@ -116,10 +157,62 @@ export const useScheduleSelection = (days: Dayjs[]) => {
     setLastSelected({ date, timeRange });
   };
 
+  const toggleDaySelection = (date: string, timeRanges: string[]) => {
+    if (timeRanges.length === 0) {
+      return;
+    }
+
+    setSelectedDates((currentSelections) => {
+      const selectionKeys = new Set(
+        currentSelections.map((option) =>
+          buildSelectionKey(option.date, option.timeRange)
+        )
+      );
+      const targetKeys = timeRanges.map((timeRange) =>
+        buildSelectionKey(date, timeRange)
+      );
+      const shouldClear = targetKeys.every((selectionKey) =>
+        selectionKeys.has(selectionKey)
+      );
+
+      if (shouldClear) {
+        const targetKeySet = new Set(targetKeys);
+
+        return currentSelections.filter(
+          (option) =>
+            !targetKeySet.has(buildSelectionKey(option.date, option.timeRange))
+        );
+      }
+
+      const nextSelections = [...currentSelections];
+
+      timeRanges.forEach((timeRange) => {
+        const selectionKey = buildSelectionKey(date, timeRange);
+
+        if (!selectionKeys.has(selectionKey)) {
+          nextSelections.push({ date, timeRange });
+          selectionKeys.add(selectionKey);
+        }
+      });
+
+      return nextSelections;
+    });
+
+    setLastSelected(null);
+  };
+
   const clearSelections = () => {
     setSelectedDates([]);
     setLastSelected(null);
   };
 
-  return { selectedDates, isSelected, selectSlot, clearSelections };
+  return {
+    selectedDates,
+    isSelected,
+    areAllSelected,
+    selectSlot,
+    setSlotSelection,
+    toggleDaySelection,
+    clearSelections,
+  };
 };

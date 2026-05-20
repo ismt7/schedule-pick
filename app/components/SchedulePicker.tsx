@@ -1,6 +1,14 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type MouseEvent,
+  type PointerEvent,
+} from "react";
 import dayjs, { type Dayjs } from "dayjs";
 import {
   ChevronLeftIcon,
@@ -11,6 +19,7 @@ import {
 import { useLunchBreaks } from "../hooks/useLunchBreaks";
 import { useScheduleSelection } from "../hooks/useScheduleSelection";
 import {
+  buildSelectionKey,
   buildScheduleSummaries,
   createWeekDays,
   formatDateKey,
@@ -32,7 +41,27 @@ interface ScheduleDayColumnProps {
   day: Dayjs;
   lunchBreaks: string[];
   isSelected: (date: string, timeRange: string) => boolean;
-  onSelectSlot: (date: string, timeRange: string, withRangeSelection: boolean) => void;
+  areAllSelected: (date: string, timeRanges: string[]) => boolean;
+  onSlotPointerDown: (
+    event: PointerEvent<HTMLButtonElement>,
+    date: string,
+    timeRange: string,
+    isDisabled: boolean
+  ) => void;
+  onSlotPointerEnter: (
+    event: PointerEvent<HTMLButtonElement>,
+    date: string,
+    timeRange: string,
+    isDisabled: boolean
+  ) => void;
+  onSlotClick: (
+    event: MouseEvent<HTMLButtonElement>,
+    date: string,
+    timeRange: string,
+    isDisabled: boolean
+  ) => void;
+  onStopDragSelection: () => void;
+  onToggleDaySelection: (date: string, timeRanges: string[]) => void;
 }
 
 interface SelectionSidebarProps {
@@ -71,24 +100,40 @@ const ScheduleDayColumn = ({
   day,
   lunchBreaks,
   isSelected,
-  onSelectSlot,
+  areAllSelected,
+  onSlotPointerDown,
+  onSlotPointerEnter,
+  onSlotClick,
+  onStopDragSelection,
+  onToggleDaySelection,
 }: ScheduleDayColumnProps) => {
   const dateKey = formatDateKey(day);
   const isPast = isPastDate(dateKey);
+  const selectableSlots = TIME_SLOTS.filter((slot) => !lunchBreaks.includes(slot));
+  const isColumnSelected = !isPast && areAllSelected(dateKey, selectableSlots);
+  const weekdayClassName =
+    day.day() === 0
+      ? "bg-red-100"
+      : day.day() === 6
+      ? "bg-blue-100"
+      : "bg-gray-100";
 
   return (
     <div className="flex flex-col overflow-hidden rounded-lg border border-gray-200 bg-white shadow-sm">
-      <div
-        className={`py-2 text-center font-semibold ${
-          day.day() === 0
-            ? "bg-red-100"
-            : day.day() === 6
-            ? "bg-blue-100"
-            : "bg-gray-100"
+      <button
+        type="button"
+        onClick={() => onToggleDaySelection(dateKey, selectableSlots)}
+        disabled={isPast}
+        className={`py-2 text-center font-semibold transition ${
+          isPast
+            ? `${weekdayClassName} cursor-not-allowed text-gray-500`
+            : isColumnSelected
+            ? "bg-blue-500 text-white hover:bg-blue-600"
+            : `${weekdayClassName} hover:brightness-95`
         }`}
       >
         {getWeekdayLabel(day)}
-      </div>
+      </button>
       <div className="flex-1 p-4">
         <h2 className="mb-3 text-center text-lg font-semibold">
           {day.format("M月D日")}
@@ -102,11 +147,17 @@ const ScheduleDayColumn = ({
               <button
                 key={slot}
                 type="button"
-                onClick={(event) =>
-                  onSelectSlot(dateKey, slot, event.shiftKey)
+                onPointerDown={(event) =>
+                  onSlotPointerDown(event, dateKey, slot, isDisabled)
                 }
+                onPointerEnter={(event) =>
+                  onSlotPointerEnter(event, dateKey, slot, isDisabled)
+                }
+                onPointerUp={onStopDragSelection}
+                onPointerCancel={onStopDragSelection}
+                onClick={(event) => onSlotClick(event, dateKey, slot, isDisabled)}
                 disabled={isDisabled}
-                className={`rounded border px-2 py-1 text-sm transition ${
+                className={`select-none rounded border px-2 py-1 text-sm transition ${
                   isDisabled
                     ? "cursor-not-allowed bg-gray-300 text-gray-500"
                     : isSelected(dateKey, slot)
@@ -173,12 +224,25 @@ export default function SchedulePicker() {
     dayjs().startOf("week")
   );
   const { lunchBreaks } = useLunchBreaks();
+  const dragSelectionRef = useRef<{
+    shouldSelect: boolean;
+    visitedKeys: Set<string>;
+  } | null>(null);
+  const suppressedClickKeyRef = useRef<string | null>(null);
 
   const days = useMemo(
     () => createWeekDays(currentWeekStart),
     [currentWeekStart]
   );
-  const { selectedDates, isSelected, selectSlot, clearSelections } =
+  const {
+    selectedDates,
+    isSelected,
+    areAllSelected,
+    selectSlot,
+    setSlotSelection,
+    toggleDaySelection,
+    clearSelections,
+  } =
     useScheduleSelection(days);
 
   const scheduleSummaries = useMemo(
@@ -191,6 +255,98 @@ export default function SchedulePicker() {
 
     await navigator.clipboard.writeText(formattedText);
     alert("選択した候補日がクリップボードにコピーされました。");
+  };
+
+  const stopDragSelection = useCallback(() => {
+    dragSelectionRef.current = null;
+    window.requestAnimationFrame(() => {
+      suppressedClickKeyRef.current = null;
+    });
+  }, []);
+
+  useEffect(() => {
+    window.addEventListener("pointerup", stopDragSelection);
+    window.addEventListener("pointercancel", stopDragSelection);
+
+    return () => {
+      window.removeEventListener("pointerup", stopDragSelection);
+      window.removeEventListener("pointercancel", stopDragSelection);
+    };
+  }, [stopDragSelection]);
+
+  const handleSlotPointerDown = (
+    event: PointerEvent<HTMLButtonElement>,
+    date: string,
+    timeRange: string,
+    isDisabled: boolean
+  ) => {
+    if (isDisabled || event.button !== 0) {
+      return;
+    }
+
+    event.preventDefault();
+
+    const selectionKey = buildSelectionKey(date, timeRange);
+    suppressedClickKeyRef.current = selectionKey;
+
+    if (event.shiftKey) {
+      selectSlot(date, timeRange, true);
+      stopDragSelection();
+      return;
+    }
+
+    const shouldSelect = !isSelected(date, timeRange);
+    dragSelectionRef.current = {
+      shouldSelect,
+      visitedKeys: new Set([selectionKey]),
+    };
+    setSlotSelection(date, timeRange, shouldSelect);
+  };
+
+  const handleSlotPointerEnter = (
+    event: PointerEvent<HTMLButtonElement>,
+    date: string,
+    timeRange: string,
+    isDisabled: boolean
+  ) => {
+    if (isDisabled || (event.buttons & 1) !== 1) {
+      return;
+    }
+
+    const dragSelection = dragSelectionRef.current;
+
+    if (!dragSelection) {
+      return;
+    }
+
+    const selectionKey = buildSelectionKey(date, timeRange);
+
+    if (dragSelection.visitedKeys.has(selectionKey)) {
+      return;
+    }
+
+    dragSelection.visitedKeys.add(selectionKey);
+    setSlotSelection(date, timeRange, dragSelection.shouldSelect);
+  };
+
+  const handleSlotClick = (
+    event: MouseEvent<HTMLButtonElement>,
+    date: string,
+    timeRange: string,
+    isDisabled: boolean
+  ) => {
+    if (isDisabled) {
+      return;
+    }
+
+    const selectionKey = buildSelectionKey(date, timeRange);
+
+    if (suppressedClickKeyRef.current === selectionKey) {
+      suppressedClickKeyRef.current = null;
+      return;
+    }
+
+    selectSlot(date, timeRange, event.shiftKey);
   };
 
   return (
@@ -214,7 +370,12 @@ export default function SchedulePicker() {
                 day={day}
                 lunchBreaks={lunchBreaks}
                 isSelected={isSelected}
-                onSelectSlot={selectSlot}
+                areAllSelected={areAllSelected}
+                onSlotPointerDown={handleSlotPointerDown}
+                onSlotPointerEnter={handleSlotPointerEnter}
+                onSlotClick={handleSlotClick}
+                onStopDragSelection={stopDragSelection}
+                onToggleDaySelection={toggleDaySelection}
               />
             ))}
           </div>
