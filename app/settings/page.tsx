@@ -1,31 +1,10 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useLunchBreaks } from "../hooks/useLunchBreaks";
+import { TIME_SLOTS } from "../lib/schedule";
 
 export default function SettingsPage() {
-  const [lunchBreaks, setLunchBreaks] = useState<string[]>(["12:00-13:00"]);
-
-  useEffect(() => {
-    const storedLunchBreaks = localStorage.getItem("lunchBreaks");
-    if (storedLunchBreaks) {
-      setLunchBreaks(JSON.parse(storedLunchBreaks));
-    }
-  }, []);
-
-  const handleLunchBreakChange = (selectedOptions: string[]) => {
-    setLunchBreaks(selectedOptions);
-    localStorage.setItem("lunchBreaks", JSON.stringify(selectedOptions));
-  };
-
-  const timeSlots = Array.from({ length: 16 }, (_, i) => {
-    const hour = 9 + Math.floor(i / 2);
-    const minute = i % 2 === 0 ? "00" : "30";
-    const nextMinute = i % 2 === 0 ? "30" : "00";
-    const nextHour = i % 2 === 0 ? hour : hour + 1;
-    return `${hour.toString().padStart(2, "0")}:${minute}-${nextHour
-      .toString()
-      .padStart(2, "0")}:${nextMinute}`;
-  });
+  const { lunchBreaks, updateLunchBreaks } = useLunchBreaks();
 
   return (
     <div className="p-4">
@@ -42,11 +21,11 @@ export default function SettingsPage() {
               const selectedOptions = Array.from(e.target.selectedOptions).map(
                 (option) => option.value
               );
-              handleLunchBreakChange(selectedOptions);
+              updateLunchBreaks(selectedOptions);
             }}
             className="block w-full border border-gray-300 rounded-md shadow-sm focus:ring-blue-500 focus:border-blue-500 sm:text-sm h-32 p-2 bg-white"
           >
-            {timeSlots.map((slot) => (
+            {TIME_SLOTS.map((slot) => (
               <option key={slot} value={slot}>
                 {slot}
               </option>
